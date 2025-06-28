@@ -1,0 +1,122 @@
+FleetCart/RentZone Deployment on AWS with S3 - Complete Guide
+Architecture Overview
+This guide explains how to deploy a FleetCart/RentZone application on AWS using EC2 for web server, S3 for file storage, and RDS for MySQL database.
+
+Complete Deployment Script with Explanations
+
+
+#1. Update EC2 instance
+sudo su                      # Become root user for full permissions
+sudo yum update -y           # Update all system packages to latest versions
+
+#2. Install Apache web server
+sudo yum install -y httpd httpd-tools mod_ssl   # Install Apache and related tools
+sudo systemctl enable httpd                     # Configure Apache to start on boot
+sudo systemctl start httpd                      # Start the Apache web server
+
+#3. Install PHP 7.4
+sudo amazon-linux-extras enable php7.4          # Enable PHP 7.4 repository
+sudo yum clean metadata                         # Clear package cache
+sudo yum install php php-common php-pear -y     # Install PHP core
+sudo yum install php-{cgi,curl,mbstring,gd,mysqlnd,gettext,json,xml,fpm,intl,zip} -y  # Install PHP extensions
+
+#4. Install MySQL 5.7 client
+sudo rpm -Uvh https://dev.mysql.com/get/mysql57-community-release-el7-11.noarch.rpm  # Add MySQL repository
+sudo rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2022  # Import security key
+sudo yum install mysql-community-server -y      # Install MySQL server
+sudo systemctl enable mysqld                    # Set MySQL to start on boot
+sudo systemctl start mysqld                     # Start MySQL service
+
+#5. Download application files from S3
+sudo aws s3 sync s3://emmydwfiles /var/www/html # Download files from S3 bucket
+
+#6. Unzip the application folder
+cd /var/www/html                                # Navigate to web directory
+sudo unzip rentzone.zip                         # Extract the application files
+
+#7. Move application files to web root
+sudo mv rentzone/* /var/www/html                # Move all regular files and folders
+
+#8. Move hidden application files
+sudo mv rentzone/.well-known /var/www/html      # Move .well-known directory
+sudo mv rentzone/.env /var/www/html             # Move environment configuration file
+sudo mv rentzone/.htaccess /var/www/html        # Move Apache configuration file
+
+#9. Clean up unnecessary files
+sudo rm -rf rentzone rentzone.zip               # Remove the original zip and empty directory
+
+#10. Configure Apache and set permissions
+sudo sed -i '/<Directory "\/var\/www\/html">/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/httpd/conf/httpd.conf  # Enable .htaccess
+chown apache:apache -R /var/www/html            # Set Apache as owner of web files
+sudo service httpd restart                      # Restart Apache to apply changes
+
+#11. Set file permissions
+sudo chmod -R 777 /var/www/html                 # Set full permissions on web directory
+sudo chmod -R 777 storage/                      # Set full permissions on storage directory
+
+#12. Configure database connection
+sudo vi .env                                    # Edit environment configuration file
+# Add your database credentials in the .env file:
+# DB_CONNECTION=mysql
+# DB_HOST=your-database-host
+# DB_PORT=3306
+# DB_DATABASE=your-database-name
+# DB_USERNAME=your-username
+# DB_PASSWORD=your-password
+
+#13. Run database migrations and seed data
+cd /var/www/html                                # Ensure you're in the application directory
+php artisan migrate --seed                      # Create database tables and add initial data
+
+#14. Clear application cache
+php artisan cache:clear                         # Clear application cache
+php artisan config:clear                        # Clear configuration cache
+php artisan view:clear                          # Clear compiled views
+
+#15. Restart web server
+sudo service httpd restart                      # Apply all configuration changes
+
+
+
+Key Differences from EFS Setup
+
+Storage Method:
+
+EFS Setup: Files stored on network file system shared across instances
+S3 Setup: Files downloaded directly to EC2 instance's local storage
+
+Scaling Considerations:
+
+EFS Setup: Multiple EC2 instances can share the same files
+S3 Setup: Each EC2 instance needs its own copy of files
+
+Database:
+
+This example installs MySQL locally instead of connecting to RDS
+Alternatively, you can use RDS by updating the DB_HOST in the .env file
+
+File Updates:
+
+EFS Setup: Update files once, available to all instances
+S3 Setup: Need to update S3 and re-sync to each instance
+
+Additional Steps:
+
+This setup requires running database migrations and seeding data
+Cache clearing is recommended to ensure proper application function
+
+Troubleshooting
+If you encounter database errors like "Table not found":
+
+Verify database credentials in the .env file
+Ensure the database exists
+Run migrations and seed commands
+Clear application cache
+
+If you have permission issues:
+
+Check ownership of files: ls -la /var/www/html
+Ensure Apache has proper permissions: chown apache:apache -R /var/www/html
+Check storage directory permissions: chmod -R 777 storage/
+
+This setup is simpler but less scalable than the EFS version. It's suitable for single-instance deployments or when using S3 as a backup/source repository.
